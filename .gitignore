@@ -64,3 +64,4 @@ target/
 # Special files for this project
 emgenutil.yaml
 motionmon.py.yaml
+pymodules

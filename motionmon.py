@@ -1,42 +1,80 @@
 #!/usr/local/bin/python -u
-"""
-Used to test motion sensor
-https://www.raspberrypi.org/learning/parent-detector/worksheet/
 
-Exec: ./test_pir.py
-"""
-
-import sys,os,traceback
-sys.path.append(os.path.join(os.path.dirname(__file__), "pymodules"))
-
-# Import smtplib for the actual sending function
-import smtplib
-
-# Import the email modules we'll need
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email import encoders
+import sys,os,logging,re,traceback
+sys.path.append("/usr/local/bin/pymodules")
+from emgenutil import EXENAME,EXEPATH,GeneralError
+import emgenutil
 
 # Import the modules we'll need
 import RPi.GPIO as GPIO
 import time
 import picamera,datetime
+#------------------------------------------------------------------------------
+# GLOBALS
+#------------------------------------------------------------------------------
 
-# import socket for singleton lock
-import socket
+logger=logging.getLogger(EXENAME)
 
+#------------------------------------------------------------------------------
+# USAGE
+#------------------------------------------------------------------------------
+
+def usage():
+   from string import Template
+   usagetext = """
+
+ $EXENAME
+
+ Function: Whatever
+
+ Syntax  : $EXENAME {--debug #}
+
+ Note    : Parm       Description
+           ---------- --------------------------------------------------------
+           --debug    optionally specifies debug option
+                      0=off 1=STDERR 2=FILE
+
+ Examples: $EXENAME
+
+ Change History:
+  em  XX/XX/2016  first written
+.
+"""
+   template = Template(usagetext)
+   return(template.substitute({'EXENAME':EXENAME}))
+
+
+#------------------------------------------------------------------------------
+# Subroutine: main
+# Function  : Main routine
+# Parms     : none (in sys.argv)
+# Returns   : nothing
+# Assumes   : sys.argv has parms, if any
+#------------------------------------------------------------------------------
 def main():
+
+   ##############################################################################
+   #
+   # Main - initialize
+   #
+   ##############################################################################
+
+   initialize()
+
+   ##############################################################################
+   #
+   # Logic
+   #
+   ##############################################################################
 
    try:
       
       # We only want 1 instance of this running.  So attempt to get the "lock".
-      get_lock('edm_watch_and_tell')
+      emgenutil.getLock(EXENAME)
       
       camera = picamera.PiCamera()
-      emailTo = "edminernew@gmail.com"
-      recordingFileName_h264 = "/home/pi/edm_watch_and_tell.h264"
-      recordingFileName_mp4  = "/home/pi/edm_watch_and_tell.mp4"
+      recordingFileName_h264 = "/tmp/%s.h264" % EXENAME
+      recordingFileName_mp4  = "/tmp/%s.mp4" % EXENAME
 
       sensor = 4
 
@@ -66,8 +104,10 @@ def main():
                print("Converting video to mp4...")
                os.system("/usr/bin/MP4Box -fps 30 -add %s %s >/tmp/MP4Box.out 2>&1" % (recordingFileName_h264, recordingFileName_mp4))
 
-               print("Sending the video to %s..." % emailTo)
-               emailFile(emailTo, recordingFileName_mp4)
+               print("Sending the video to %s..." % emgenutil.G_options.emailTo)
+               subject = 'Something or someone just passed by at %s!' % datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
+               bodyText = 'Please see the attached file.'
+               emgenutil.sendEmail(emgenutil.G_options.emailTo, subject, bodyText, binaryFilepath=recordingFileName_mp4)
 
                # cleanup and reset
                os.remove(recordingFileName_h264)
@@ -83,72 +123,70 @@ def main():
             print("No change to GPIO pin")
             sleepTime = 1.0
 
+   except GeneralError as e:
+      if emgenutil.G_options.debug:
+         # Fuller display of the Exception type and where the exception occured in the code
+         (eType, eValue, eTraceback) = sys.exc_info()
+         tbprintable = ''.join(traceback.format_tb(eTraceback))
+         emgenutil.exitWithErrorMessage("%s Exception: %s\n%s" % (eType.__name__, eValue, tbprintable), errorCode=e.errorCode)
+      else:
+         emgenutil.exitWithErrorMessage(e.message, errorCode=e.errorCode)
 
    except Exception as e:
-      # Fuller display of the Exception type and where the exception occured in the code
-      (eType, eValue, eTraceback) = sys.exc_info()
-      tbprintable = ''.join(traceback.format_tb(eTraceback))
-      print("%s Exception: %s\n%s" % (eType.__name__, eValue, tbprintable))
+      if emgenutil.G_options.debug:
+         # Fuller display of the Exception type and where the exception occured in the code
+         (eType, eValue, eTraceback) = sys.exc_info()
+         tbprintable = ''.join(traceback.format_tb(eTraceback))
+         emgenutil.exitWithErrorMessage("%s Exception: %s\n%s" % (eType.__name__, eValue, tbprintable))
+      else:
+         emgenutil.exitWithErrorMessage(str(e))
 
-   print("Done!")
+   ##############################################################################
+   #
+   # Finish up
+   #
+   ##############################################################################
+
+   logger.info(EXENAME+" exiting")
+   logging.shutdown()
 
    exit()
 
 
-def get_lock(process_name):
-  global lock_socket   # Without this our lock gets garbage collected
-  lock_socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-  try:
-    lock_socket.bind('\0' + process_name)
-    print('We got the lock')
-  except socket.error:
-    print('Lock exists so another instance of this script must be running.  Exiting.')
-    exit()
+#------------------------------------------------------------------------------
+# Subroutine: initialize
+# Function  : performs initialization of variable, CONSTANTS, other
+# Parms     : none
+# Returns   : nothing
+# Assumes   : ARGV has parms, if any
+#------------------------------------------------------------------------------
+def initialize():
 
+   # PROCESS COMMAND LINE PARAMETERS
 
-def emailFile(emailTo, binaryFilename):
+   import argparse  # http://www.pythonforbeginners.com/modules-in-python/argparse-tutorial/
 
-   #---------------------------------------------------------------------------
-   # Send an email with a file attachment
-   #---------------------------------------------------------------------------
+   parser = argparse.ArgumentParser(usage=usage())
+   parser.add_argument('emailTo')                        # positional, required
+   parser.add_argument('--debug', dest="debug", type=int, help='0=no debug, 1=STDERR, 2=log file')
 
-   hostname   = os.uname().nodename
-   emailFrom  = 'donotreply@%s' % hostname
-   gmailUsername = 'edminerpi@gmail.com'
-   gmailPassword = 'piplayt1me'
+   emgenutil.G_options = parser.parse_args()
 
-   print("Sending an email with a file attachment...")
-   # Create the enclosing (outer) message
-   msg = MIMEMultipart()
-   msg['Subject'] = 'Something or someone just passed by at %s!' % datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
-   msg['To'] = emailTo
-   msg['From'] = emailFrom
-   msg.preamble = 'You will not see this in a MIME-aware mail reader.\n'
-   msg.attach(MIMEText('This file is attached: %s' % binaryFilename))
+   if emgenutil.G_options.debug == None or emgenutil.G_options.debug == 0:
+      logging.disable(logging.CRITICAL)  # effectively disable all logging
+   else:
+      if emgenutil.G_options.debug == 9:
+         emgenutil.configureLogging(loglevel='DEBUG')
+      else:
+         emgenutil.configureLogging()
 
-   ctype = 'application/octet-stream'
-   maintype, subtype = ctype.split('/', 1)
-   with open(binaryFilename,"rb") as INFILE:
-      fileAttachment = MIMEBase(maintype, subtype)
-      fileAttachment.set_payload(INFILE.read())
+   #global G_config
+   #G_config = emgenutil.processConfigFile()
 
-   # Encode the payload using Base64
-   encoders.encode_base64(fileAttachment)
+   logger.info(EXENAME+" starting:"+__name__+" with these args:"+str(sys.argv))
 
-   # Set the filename parameter and attach file to outer message
-   fileAttachment.add_header('Content-Disposition', 'attachment', filename=binaryFilename)
-   msg.attach(fileAttachment)
-
-   # Now send the message
-   mailServer = smtplib.SMTP('smtp.gmail.com:587')
-   mailServer.starttls()
-   mailServer.login(gmailUsername,gmailPassword)
-
-   mailServer.sendmail(emailFrom, emailTo, msg.as_string())
-   mailServer.quit()
-
+# Standard boilerplate to call the main() function to begin the program.
 if __name__ == "__main__":
-
    main()
 
 #               print("1st Picture")
