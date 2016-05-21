@@ -2,8 +2,8 @@
 
 import sys,os,logging,re,traceback
 sys.path.append("/usr/local/bin/pymodules")
-from emgenutil import EXENAME,EXEPATH,GeneralError
-import emgenutil
+from genutil import EXENAME,EXEPATH,GeneralError
+import genutil
 
 # Import the modules we'll need
 import RPi.GPIO as GPIO
@@ -70,7 +70,7 @@ def main():
    try:
       
       # We only want 1 instance of this running.  So attempt to get the "lock".
-      emgenutil.getLock(EXENAME)
+      genutil.getLock(EXENAME)
       
       camera = picamera.PiCamera()
       recordingFileName_h264 = "/tmp/%s.h264" % EXENAME
@@ -104,10 +104,10 @@ def main():
                print("Converting video to mp4...")
                os.system("/usr/bin/MP4Box -fps 30 -add %s %s >/tmp/MP4Box.out 2>&1" % (recordingFileName_h264, recordingFileName_mp4))
 
-               print("Sending the video to %s..." % emgenutil.G_options.emailTo)
+               print("Sending the video to %s..." % genutil.G_options.emailTo)
                subject = 'Something or someone just passed by at %s!' % datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
                bodyText = 'Please see the attached file.'
-               emgenutil.sendEmail(emgenutil.G_options.emailTo, subject, bodyText, binaryFilepath=recordingFileName_mp4)
+               genutil.sendEmail(genutil.G_options.emailTo, subject, bodyText, binaryFilepath=recordingFileName_mp4)
 
                # cleanup and reset
                os.remove(recordingFileName_h264)
@@ -124,22 +124,22 @@ def main():
             sleepTime = 1.0
 
    except GeneralError as e:
-      if emgenutil.G_options.debug:
+      if genutil.G_options.debug:
          # Fuller display of the Exception type and where the exception occured in the code
          (eType, eValue, eTraceback) = sys.exc_info()
          tbprintable = ''.join(traceback.format_tb(eTraceback))
-         emgenutil.exitWithErrorMessage("%s Exception: %s\n%s" % (eType.__name__, eValue, tbprintable), errorCode=e.errorCode)
+         genutil.exitWithErrorMessage("%s Exception: %s\n%s" % (eType.__name__, eValue, tbprintable), errorCode=e.errorCode)
       else:
-         emgenutil.exitWithErrorMessage(e.message, errorCode=e.errorCode)
+         genutil.exitWithErrorMessage(e.message, errorCode=e.errorCode)
 
    except Exception as e:
-      if emgenutil.G_options.debug:
+      if genutil.G_options.debug:
          # Fuller display of the Exception type and where the exception occured in the code
          (eType, eValue, eTraceback) = sys.exc_info()
          tbprintable = ''.join(traceback.format_tb(eTraceback))
-         emgenutil.exitWithErrorMessage("%s Exception: %s\n%s" % (eType.__name__, eValue, tbprintable))
+         genutil.exitWithErrorMessage("%s Exception: %s\n%s" % (eType.__name__, eValue, tbprintable))
       else:
-         emgenutil.exitWithErrorMessage(str(e))
+         genutil.exitWithErrorMessage(str(e))
 
    ##############################################################################
    #
@@ -170,18 +170,18 @@ def initialize():
    parser.add_argument('emailTo')                        # positional, required
    parser.add_argument('--debug', dest="debug", type=int, help='0=no debug, 1=STDERR, 2=log file')
 
-   emgenutil.G_options = parser.parse_args()
+   genutil.G_options = parser.parse_args()
 
-   if emgenutil.G_options.debug == None or emgenutil.G_options.debug == 0:
+   if genutil.G_options.debug == None or genutil.G_options.debug == 0:
       logging.disable(logging.CRITICAL)  # effectively disable all logging
    else:
-      if emgenutil.G_options.debug == 9:
-         emgenutil.configureLogging(loglevel='DEBUG')
+      if genutil.G_options.debug == 9:
+         genutil.configureLogging(loglevel='DEBUG')
       else:
-         emgenutil.configureLogging()
+         genutil.configureLogging()
 
    #global G_config
-   #G_config = emgenutil.processConfigFile()
+   #G_config = genutil.processConfigFile()
 
    logger.info(EXENAME+" starting:"+__name__+" with these args:"+str(sys.argv))
 
