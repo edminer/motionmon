@@ -116,7 +116,7 @@ def main():
                
                print("Starting to take pictures...")
 
-               if genutil.G_options.light: GPIO.output(12,0)  # switch light on
+               if genutil.G_options.light: GPIO.output(relayPin,0)  # switch light on
 
                with picamera.PiCamera() as camera:
                   if genutil.G_options.captureType.lower() == 'video':
@@ -130,7 +130,7 @@ def main():
                      camera.capture(photoFileName)
                      binaryFilename = photoFileName
 
-               if genutil.G_options.light: GPIO.output(12,1)  # switch light off
+               if genutil.G_options.light: GPIO.output(relayPin,1)  # switch light off
 
                if genutil.G_options.captureType.lower() == 'video':
                   # Convert the H264 video file to MP4
