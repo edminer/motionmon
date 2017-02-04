@@ -25,19 +25,27 @@ def usage():
 
  $EXENAME
 
- Function: Whatever
+ Function: Motion Monitor.  Watches for motion and then takes a photo/video and emails it out.
+           Start it once and it will run forever.
 
- Syntax  : $EXENAME {--debug #}
+ Syntax  : $EXENAME {--light} {--delay #} {--snooze #} {--debug #} emailAddress captureType
 
- Note    : Parm       Description
-           ---------- --------------------------------------------------------
-           --debug    optionally specifies debug option
-                      0=off 1=STDERR 2=FILE
+ Note    : Parm         Description
+           ----------   --------------------------------------------------------
+           email        email address of person to receive the photo/video file
+           captureType  photo or video
+           --snooze     # of seconds to snooze before re-arming for motion detection after detecting motion
+                        defaults to 1800
+           --light      optional: turn on a light before taking the photo/video
+           --delay      # of seconds to wait after detecting motion before turning on the light (optionally) and taking the video/photo
+                        defaults to No Delay.
+           --debug      optionally specifies debug option
+                        0=off 1=STDERR 2=FILE
 
- Examples: $EXENAME
+ Examples: $EXENAME jdoeman@gmail.com photo --light --snooze 30 
 
  Change History:
-  em  XX/XX/2016  first written
+  em  06/01/2016  first written
 .
 """
    template = Template(usagetext)
@@ -61,6 +69,15 @@ def main():
 
    initialize()
 
+   GPIO.setwarnings(False)
+   GPIO.setmode(GPIO.BOARD)
+   sensorPin = 7
+   relayPin  = 12
+
+   if genutil.G_options.light:
+      logger.info("setting up GPIO for light")
+      GPIO.setup(relayPin, GPIO.OUT)
+
    ##############################################################################
    #
    # Logic
@@ -68,19 +85,16 @@ def main():
    ##############################################################################
 
    try:
-      
+
       # We only want 1 instance of this running.  So attempt to get the "lock".
       genutil.getLock(EXENAME)
-      
-      camera = picamera.PiCamera()
+
       recordingFileName_h264 = "/tmp/%s.h264" % EXENAME
       recordingFileName_mp4  = "/tmp/%s.mp4" % EXENAME
+      photoFileName          = "/tmp/%s.jpg" % EXENAME
 
-      sensor = 4
-
-      GPIO.setmode(GPIO.BCM)
-      # set the sensor channel as an INPUT with an initial voltage state of 0(LOW)
-      GPIO.setup(sensor, GPIO.IN, GPIO.PUD_DOWN)
+      # set the sensor Pin as an INPUT with an initial voltage state of 0(LOW)
+      GPIO.setup(sensorPin, GPIO.IN, GPIO.PUD_DOWN)
 
       previous_state = False
       current_state = False
@@ -90,33 +104,57 @@ def main():
          print("Sleeping for %d seconds..." % sleepTime)
          time.sleep(sleepTime)
          previous_state = current_state
-         current_state = GPIO.input(sensor)
+         current_state = GPIO.input(sensorPin)
          #current_state = True   # for testing.
          if current_state != previous_state:
             if current_state:
-               print("GPIO pin %s is HIGH.  Motion detected.  Starting to take pictures..." % (sensor))
-               print("Taking some video...")
-               camera.start_recording(recordingFileName_h264)
-               time.sleep(5)
-               camera.stop_recording()
+               print("GPIO pin %s is HIGH.  Motion detected." % (sensorPin))
+               
+               if genutil.G_options.delay:
+                  print("Sleeping %d seconds before taking pictures..." % genutil.G_options.delay)
+                  time.sleep(genutil.G_options.delay)
+               
+               print("Starting to take pictures...")
 
-               # Convert the H264 video file to MP4
-               print("Converting video to mp4...")
-               os.system("/usr/bin/MP4Box -fps 30 -add %s %s >/tmp/MP4Box.out 2>&1" % (recordingFileName_h264, recordingFileName_mp4))
+               if genutil.G_options.light: GPIO.output(12,0)  # switch light on
 
-               print("Sending the video to %s..." % genutil.G_options.emailTo)
+               with picamera.PiCamera() as camera:
+                  if genutil.G_options.captureType.lower() == 'video':
+                     print("Taking some video...")
+                     camera.start_recording(recordingFileName_h264)
+                     time.sleep(5)
+                     camera.stop_recording()
+                     binaryFilename = recordingFileName_mp4
+                  else:
+                     print("Taking a photo...")
+                     camera.capture(photoFileName)
+                     binaryFilename = photoFileName
+
+               if genutil.G_options.light: GPIO.output(12,1)  # switch light off
+
+               if genutil.G_options.captureType.lower() == 'video':
+                  # Convert the H264 video file to MP4
+                  print("Converting video to mp4...")
+                  os.system("/usr/bin/MP4Box -fps 30 -add %s %s >/tmp/MP4Box.out 2>&1" % (recordingFileName_h264, recordingFileName_mp4))
+
+               print("Sending the photo/video to %s..." % genutil.G_options.emailTo)
                subject = 'Something or someone just passed by at %s!' % datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
                bodyText = 'Please see the attached file.'
-               genutil.sendEmail(genutil.G_options.emailTo, subject, bodyText, binaryFilepath=recordingFileName_mp4)
+               genutil.sendEmail(genutil.G_options.emailTo, subject, bodyText, binaryFilepath=binaryFilename)
 
                # cleanup and reset
-               os.remove(recordingFileName_h264)
-               os.remove(recordingFileName_mp4)
-               sleepTime = 1800
-               GPIO.setup(sensor, GPIO.IN, GPIO.PUD_DOWN)
+               if genutil.G_options.captureType.lower() == 'video':
+                  os.remove(recordingFileName_h264)
+                  os.remove(recordingFileName_mp4)
+               else:
+                  os.remove(photoFileName)
+
+               # Wait a bit of time before rearming for motion detection again (to prevent triggering rapid photo/video captures
+               sleepTime = genutil.G_options.snooze
+               GPIO.setup(sensorPin, GPIO.IN, GPIO.PUD_DOWN)
                current_state = False
             else:
-               print("GPIO pin %s is LOW.  Motion is no longer detected." % (sensor))
+               print("GPIO pin %s is LOW.  Motion is no longer detected." % (sensorPin))
                sleepTime = 1.0
 
          else:
@@ -168,6 +206,10 @@ def initialize():
 
    parser = argparse.ArgumentParser(usage=usage())
    parser.add_argument('emailTo')                        # positional, required
+   parser.add_argument('captureType')                    # positional, required.  photo or video
+   parser.add_argument('-l', '--light', action="store_true", dest="light", help='Turn on a light when taking the photo/video.')
+   parser.add_argument('--delay', dest="delay", type=int, help='# of seconds to delay after motion is detected before taking photo/video.  Default is 0.')
+   parser.add_argument('--snooze', dest="snooze", type=int, help='# of seconds to snooze after detecting motion before checking again.  Default is 1800.')
    parser.add_argument('--debug', dest="debug", type=int, help='0=no debug, 1=STDERR, 2=log file')
 
    genutil.G_options = parser.parse_args()
@@ -179,6 +221,12 @@ def initialize():
          genutil.configureLogging(loglevel='DEBUG')
       else:
          genutil.configureLogging()
+
+   if genutil.G_options.delay == None:
+      genutil.G_options.delay = 0
+
+   if genutil.G_options.snooze == None:
+      genutil.G_options.snooze = 1800
 
    #global G_config
    #G_config = genutil.processConfigFile()
