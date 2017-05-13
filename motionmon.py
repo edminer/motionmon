@@ -77,6 +77,7 @@ def main():
    if genutil.G_options.light:
       logger.info("setting up GPIO for light")
       GPIO.setup(relayPin, GPIO.OUT)
+      GPIO.output(relayPin,1)  # switch light off
 
    ##############################################################################
    #
