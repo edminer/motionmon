@@ -142,6 +142,7 @@ def main():
                subject = 'Something or someone just passed by at %s!' % datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
                bodyText = 'Please see the attached file.'
                genutil.sendEmail(genutil.G_options.emailTo, subject, bodyText, binaryFilepath=binaryFilename)
+               genutil.sendTwitterDirectMessage(genutil.G_options.twitterTo, subject)
 
                # cleanup and reset
                if genutil.G_options.captureType.lower() == 'video':
@@ -207,6 +208,7 @@ def initialize():
 
    parser = argparse.ArgumentParser(usage=usage())
    parser.add_argument('emailTo')                        # positional, required
+   parser.add_argument('twitterTo')                      # positional, required
    parser.add_argument('captureType')                    # positional, required.  photo or video
    parser.add_argument('-l', '--light', action="store_true", dest="light", help='Turn on a light when taking the photo/video.')
    parser.add_argument('--delay', dest="delay", type=int, help='# of seconds to delay after motion is detected before taking photo/video.  Default is 0.')
