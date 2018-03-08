@@ -26,14 +26,17 @@ def usage():
  $EXENAME
 
  Function: Motion Monitor.  Watches for motion and then takes a photo/video and emails it out.
+           A pushover notification will be sent and optionally a twitter message too.
            Start it once and it will run forever.
 
- Syntax  : $EXENAME {--light} {--delay #} {--snooze #} {--debug #} emailAddress captureType
+ Syntax  : $EXENAME {--light} {--delay #} {--snooze #} {--debug #} {--twitter name} email pushover captureType
 
  Note    : Parm         Description
            ----------   --------------------------------------------------------
            email        email address of person to receive the photo/video file
+           pushover     name of pushover user to notify
            captureType  photo or video
+           --twitter    name of twitter user to notify
            --snooze     # of seconds to snooze before re-arming for motion detection after detecting motion
                         defaults to 1800
            --light      optional: turn on a light before taking the photo/video
@@ -42,10 +45,11 @@ def usage():
            --debug      optionally specifies debug option
                         0=off 1=STDERR 2=FILE
 
- Examples: $EXENAME jdoeman@gmail.com photo --light --snooze 30 
+ Examples: $EXENAME jdoeman@gmail.com jdoeman photo --light --snooze 30 
 
  Change History:
   em  06/01/2016  first written
+  em  03/01/2018  always capture photo, require pushover user instead of twitter name
 .
 """
    template = Template(usagetext)
@@ -127,29 +131,35 @@ def main():
                      camera.stop_recording()
                      binaryFilename = recordingFileName_mp4
                   else:
-                     print("Taking a photo...")
-                     camera.capture(photoFileName)
                      binaryFilename = photoFileName
+                  # always take a photo
+                  print("Taking a photo...")
+                  camera.capture(photoFileName)
 
                if genutil.G_options.light: GPIO.output(relayPin,1)  # switch light off
 
+               subject = 'Something or someone just passed by at %s!' % datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
+
+               # if an video is requested, convert it to mp4 and email it out.
                if genutil.G_options.captureType.lower() == 'video':
                   # Convert the H264 video file to MP4
                   print("Converting video to mp4...")
                   os.system("/usr/bin/MP4Box -fps 30 -add %s %s >/tmp/MP4Box.out 2>&1" % (recordingFileName_h264, recordingFileName_mp4))
+                  print("Sending the photo/video to %s..." % genutil.G_options.emailTo)
+                  bodyText = 'Please see the attached file.'
+                  genutil.sendEmail(genutil.G_options.emailTo, subject, bodyText, binaryFilepath=binaryFilename)
+               
+               # Send a photo notification to the Pushover user
+               genutil.sendPushoverMessage(genutil.G_options.pushoverTo, subject, binaryFilepath=photoFileName)
 
-               print("Sending the photo/video to %s..." % genutil.G_options.emailTo)
-               subject = 'Something or someone just passed by at %s!' % datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
-               bodyText = 'Please see the attached file.'
-               genutil.sendEmail(genutil.G_options.emailTo, subject, bodyText, binaryFilepath=binaryFilename)
-               genutil.sendTwitterDirectMessage(genutil.G_options.twitterTo, subject)
+               if genutil.G_options.twitterTo:
+                  genutil.sendTwitterDirectMessage(genutil.G_options.twitterTo, subject)
 
                # cleanup and reset
                if genutil.G_options.captureType.lower() == 'video':
                   os.remove(recordingFileName_h264)
                   os.remove(recordingFileName_mp4)
-               else:
-                  os.remove(photoFileName)
+               os.remove(photoFileName)
 
                # Wait a bit of time before rearming for motion detection again (to prevent triggering rapid photo/video captures
                sleepTime = genutil.G_options.snooze
@@ -208,12 +218,13 @@ def initialize():
 
    parser = argparse.ArgumentParser(usage=usage())
    parser.add_argument('emailTo')                        # positional, required
-   parser.add_argument('twitterTo')                      # positional, required
+   parser.add_argument('pushoverTo')                      # positional, required
    parser.add_argument('captureType')                    # positional, required.  photo or video
    parser.add_argument('-l', '--light', action="store_true", dest="light", help='Turn on a light when taking the photo/video.')
    parser.add_argument('--delay', dest="delay", type=int, help='# of seconds to delay after motion is detected before taking photo/video.  Default is 0.')
    parser.add_argument('--snooze', dest="snooze", type=int, help='# of seconds to snooze after detecting motion before checking again.  Default is 1800.')
    parser.add_argument('--debug', dest="debug", type=int, help='0=no debug, 1=STDERR, 2=log file')
+   parser.add_argument('--twitterTo', dest="twitterTo", help='Twitter user name')
 
    genutil.G_options = parser.parse_args()
 
